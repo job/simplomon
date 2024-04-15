@@ -97,7 +97,8 @@ std::mutex SSLHelper::d_lock;
 void SSLHelper::printDetails()
 {
   X509                *cert = NULL;
-  cert = SSL_get0_peer_certificate(ssl); // has to be 0 because we leak otherwise
+
+  cert = SSL_get_peer_certificate(ssl);
   
   X509_NAME_print_ex_fp(stdout, X509_get_subject_name(cert), 0,XN_FLAG_RFC2253);
   fmt::print("\n");
@@ -124,6 +125,7 @@ void SSLHelper::printDetails()
   t=X509_get_notBefore(cert);
   ASN1_TIME_to_tm(t, &notbefore);
   fmt::print("{:%Y-%m-%d %H:%M} - {:%Y-%m-%d %H:%M}\n", notbefore, notafter);
+  X509_free(cert);
 }
 
 void SSLHelper::checkConnection(const std::string& host, int minCertDays)
@@ -133,9 +135,11 @@ void SSLHelper::checkConnection(const std::string& host, int minCertDays)
     throw std::runtime_error(fmt::format("Certificate verification error: {}\n", X509_verify_cert_error_string(verify_result)));
   }
   
-  X509* cert = SSL_get0_peer_certificate(ssl);
+  X509 *cert = SSL_get_peer_certificate(ssl);
+
   // this is sensitive to trailing dots
   if (X509_check_host(cert, host.c_str(), host.size(), 0, NULL) != 1) {
+    X509_free(cert);
     throw std::runtime_error(fmt::format("Cert does not match host {}", host));
   }
 
@@ -145,10 +149,13 @@ void SSLHelper::checkConnection(const std::string& host, int minCertDays)
     ASN1_TIME_to_tm(t, &notafter);
     time_t expire = mktime(&notafter);
     double days = (expire - time(nullptr))/86400.0;
+    X509_free(cert);
     if(days < minCertDays)
       throw std::runtime_error(
                                fmt::format("Certificate for {} set to expire in {:.0f} days",
                                            host, days));
+  } else {
+    X509_free(cert);
   }
 }
 
